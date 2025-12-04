@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard MQTT - Temperatura</title>
+
+  <!-- Biblioteca MQTT Paho (VERSÃO CORRETA PARA BROWSER + WEBSOCKET) -->
+<script src="mqttws31.min.js"></script>
+
+
+  <!-- Chart.js para o gráfico -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #6372b6;
+      color: #e5e7eb;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    h1 { text-align: center; margin-bottom: 8px; }
+    .subtitle {
+      text-align: center;
+      font-size: 13px;
+      color: #9ca3af;
+      margin-bottom: 24px;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 16px;
+    }
+    .card {
+      background: #020617;
+      border-radius: 16px;
+      padding: 16px;
+      border: 1px solid #1f2937;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    }
+    .card h2 { font-size: 17px; margin-bottom: 6px; }
+    .card small { color: #9ca3af; }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #1f2937;
+      color: #9ca3af;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    #ultimo-valor {
+      font-size: 40px;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+    .status { margin-top: 8px; font-size: 13px; }
+    .status-ok { color: #22c55e; font-weight: bold; }
+    .status-erro { color: #ef4444; font-weight: bold; }
+    .linha { height: 1px; background: #1f2937; margin: 10px 0; }
+    #mensagem-bruta, #log {
+      background: #020617;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: "Fira Code", monospace;
+      color: #9ca3af;
+      white-space: pre-wrap;
+    }
+    #mensagem-bruta { min-height: 36px; word-wrap: break-word; }
+    #log { max-height: 160px; overflow-y: auto; }
+    #historico {
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 13px;
+      margin-top: 6px;
+    }
+    #historico div {
+      border-bottom: 1px dashed #1f2937;
+      padding: 2px 0;
+    }
+    @media (max-width: 900px) {
+      .container { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<h1>Dashboard Temperatura MQTT</h1>
+
+
+<div class="container">
+  <!-- CARD ESQUERDO: GRÁFICO -->
+  <div class="card">
+    <div style="display:flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h2>Temperatura em tempo real</h2>
+        <small>Atualiza sempre que chegar uma nova mensagem no tópico.</small>
+      </div>
+      <div class="badge">MQTT • LIVE</div>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <canvas id="graficoTemperatura" height="120"></canvas>
+    </div>
+    <small style="color:#9ca3af; display:block; margin-top:4px;">
+      Mostrando as últimas 30 leituras.
+    </small>
+  </div>
+
+  <!-- CARD DIREITO: STATUS + ÚLTIMA LEITURA + LOG -->
+  <div class="card">
+    <h2>Última leitura</h2>
+    <small>Valor numérico extraído da mensagem.</small>
+
+    <div id="ultimo-valor">-- °C</div>
+
+    <div class="status">
+      Status da conexão:
+      <span id="status-conexao" class="status-erro">Desconectado</span>
+    </div>
+
+    <div class="linha"></div>
+
+    <small>Mensagem bruta recebida:</small>
+    <div id="mensagem-bruta">Nenhuma mensagem ainda...</div>
+
+    <div class="linha"></div>
+
+    <h2>Histórico recente (últimas 10 mensagens)</h2>
+    <div id="historico"></div>
+
+    <div class="linha"></div>
+
+    <h2>Log técnico</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+  // ============================
+  // CONFIGURAÇÕES MQTT
+  // ============================
+  const MQTT_HOST   = "163.176.174.224";
+  const MQTT_PORT   = 9001;               // WebSocket
+  const MQTT_TOPIC  = "teste/caprover";
+  const MQTT_USER   = "admin";
+  const MQTT_PASS   = "@Senai2025";
+
+  // ============================
+  // ELEMENTOS DA PÁGINA
+  // ============================
+  const spanStatus       = document.getElementById("status-conexao");
+  const divUltimoValor   = document.getElementById("ultimo-valor");
+  const divMensagemBruta = document.getElementById("mensagem-bruta");
+  const divHistorico     = document.getElementById("historico");
+  const divLog           = document.getElementById("log");
+
+  function log(msg) {
+    console.log(msg);
+    if (divLog) {
+      divLog.textContent += msg + "\n";
+      divLog.scrollTop = divLog.scrollHeight;
+    }
+  }
+
+  function setStatus(texto, ok) {
+    if (!spanStatus) return;
+    spanStatus.textContent = texto;
+    spanStatus.classList.remove("status-ok", "status-erro");
+    spanStatus.classList.add(ok ? "status-ok" : "status-erro");
+  }
+
+  // Debug: ver se a lib carregou
+  log("Tipo de Paho: " + typeof Paho);
+
+ // ============================
+// GRÁFICO (Chart.js)
+// ============================
+const dadosTemperatura = [];
+const dadosTempo       = [];
+const MAX_PONTOS       = 30;
+
+// Limitar frequência de atualização do gráfico
+let ultimaAtualizacao = 0;
+const INTERVALO_MS = 500; // atualiza no máximo 2x por segundo
+
+// Inicialização do gráfico
+const ctx = document.getElementById("graficoTemperatura").getContext("2d");
+const grafico = new Chart(ctx, {
+  type: "line",
+  data: {
+    labels: dadosTempo,
+    datasets: [{
+      label: "Temperatura (°C)",
+      data: dadosTemperatura,
+      tension: 0.3,
+      borderWidth: 2,
+      pointRadius: 2
+    }]
+  },
+  options: {
+    responsive: true,
+    animation: false, // <<< DESATIVA ANIMAÇÃO
+    plugins: {
+      legend: {
+        labels: { color: "#e5e7eb" }
+      }
+    },
+    scales: {
+      x: {
+        ticks: { color: "#9ca3af" },
+        grid:  { color: "#1f2937" }
+      },
+      y: {
+        ticks: { color: "#9ca3af" },
+        grid:  { color: "#1f2937" }
+      }
+    }
+  }
+});
+
+// ============================
+// ADICIONAR NOVO PONTO NO GRÁFICO
+// ============================
+function adicionarPonto(temp) {
+  const agora   = new Date();
+  const horaStr = agora.toLocaleTimeString("pt-BR", { hour12: false });
+
+  dadosTempo.push(horaStr);
+  dadosTemperatura.push(temp);
+
+  // Mantém sempre no máximo MAX_PONTOS
+  if (dadosTempo.length > MAX_PONTOS) {
+    dadosTempo.shift();
+    dadosTemperatura.shift();
+  }
+
+  // Controle de frequência para evitar travar o Chart.js
+  const agoraMs = Date.now();
+  if (agoraMs - ultimaAtualizacao >= INTERVALO_MS) {
+    ultimaAtualizacao = agoraMs;
+    grafico.update("none"); // <<< UPDATE SEM ANIMAÇÃO
+  }
+}
+
+
+  // ============================
+  // HISTÓRICO
+  // ============================
+  const historicoMensagens = [];
+  const MAX_HISTORICO      = 10;
+
+  function adicionarAoHistorico(texto) {
+    const agora   = new Date();
+    const horaStr = agora.toLocaleTimeString("pt-BR", { hour12: false });
+
+    historicoMensagens.unshift("[" + horaStr + "] " + texto);
+    if (historicoMensagens.length > MAX_HISTORICO) {
+      historicoMensagens.pop();
+    }
+
+    if (!divHistorico) return;
+    divHistorico.innerHTML = "";
+    historicoMensagens.forEach(msg => {
+      const div = document.createElement("div");
+      div.textContent = msg;
+      divHistorico.appendChild(div);
+    });
+  }
+
+  // ============================
+  // CLIENTE MQTT (Paho)
+  // ============================
+  
+const clientID = "webclient_" + Math.floor(Math.random() * 100000);
+
+// Forçar uso de URL completa WebSocket
+let client = null;
+
+if (window.Paho && typeof window.Paho.Client === "function") {
+  log("Usando Paho.Client com URL");
+  client = new window.Paho.Client("ws://" + MQTT_HOST + ":" + MQTT_PORT + "/mqtt", clientID);
+} else if (window.Paho && window.Paho.MQTT && typeof window.Paho.MQTT.Client === "function") {
+  log("Usando Paho.MQTT.Client com URL");
+  client = new window.Paho.MQTT.Client("ws://" + MQTT_HOST + ":" + MQTT_PORT + "/mqtt", clientID);
+} else {
+  log("ERRO: biblioteca Paho não tem Client exposto.");
+}
+
+
+  client.onConnectionLost = function (responseObject) {
+    log("onConnectionLost: " + (responseObject.errorMessage || "sem mensagem"));
+    setStatus("Conexão perdida", false);
+  };
+
+  client.onMessageArrived = function (message) {
+    const texto = message.payloadString;
+    log("Mensagem recebida: " + texto);
+
+    if (divMensagemBruta) divMensagemBruta.textContent = texto;
+    adicionarAoHistorico(texto);
+
+    const regex = /(-?\d+(?:\.\d+)?)\s*°?C/i;
+    const match = texto.match(regex);
+    if (match) {
+      const temp = parseFloat(match[1]);
+      if (divUltimoValor) {
+        divUltimoValor.textContent = temp.toFixed(1) + " °C";
+      }
+      adicionarPonto(temp);
+    } else {
+      if (divUltimoValor) divUltimoValor.textContent = "-- °C";
+    }
+  };
+
+  function onConnect() {
+    log("Conectado ao broker via WebSocket.");
+    setStatus("Conectado", true);
+    client.subscribe(MQTT_TOPIC);
+    log("Inscrito no tópico: " + MQTT_TOPIC);
+  }
+
+  function onFailure(err) {
+    log("Falha ao conectar: " + err.errorMessage);
+    setStatus("Erro ao conectar", false);
+  }
+
+  // ============================
+  // INICIAR CONEXÃO
+  // ============================
+  log("Tentando conectar em ws://" + MQTT_HOST + ":" + MQTT_PORT);
+  setStatus("Conectando...", false);
+
+  client.connect({
+    userName: MQTT_USER,
+    password: MQTT_PASS,
+    useSSL: false,
+    timeout: 10,
+    onSuccess: onConnect,
+    onFailure: onFailure
+  });
+</script>
+
+</body>
+</html>

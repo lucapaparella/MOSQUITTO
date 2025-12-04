@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard MQTT - CapRover</title>
+<script src="mqttws31.min.js"></script>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #f4f4f4;
+        padding: 30px;
+    }
+    h1 { text-align: center; }
+    #dados {
+        background: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        width: 500px;
+        margin: auto;
+        margin-top: 20px;
+        box-shadow: 0 0 10px #aaa;
+        font-size: 18px;
+    }
+</style>
+</head>
+
+<body>
+
+<h1>📡 Recebendo Dados do MQTT</h1>
+
+<div id="dados">Aguardando mensagens...</div>
+
+<script>
+    // ===============================
+    // CONFIGURAÇÕES DO SERVIDOR MQTT
+    // ===============================
+
+    const broker = "163.176.174.224";        // IP do seu servidor
+    const port = 9001;                       // Porta WebSocket do Mosquitto
+    const topic = "teste/caprover";
+
+    // Usuário e senha do Mosquitto
+    const usuario = "admin";
+    const senha   = "@Senai2025";
+
+    // ===============================
+    // CRIA O CLIENTE
+    // ===============================
+    const clientID = "webclient_" + parseInt(Math.random() * 100000);
+
+    const client = new Paho.Client(broker, port, clientID);
+
+    // ===============================
+    // CALLBACK QUANDO CHEGA MENSAGEM
+    // ===============================
+    client.onMessageArrived = function (message) {
+        console.log("Recebido:", message.payloadString);
+        document.getElementById("dados").innerHTML = message.payloadString;
+    };
+
+    // ===============================
+    // CALLBACK DE CONEXÃO
+    // ===============================
+    function onConnect() {
+        console.log("Conectado ao MQTT WebSocket!");
+        client.subscribe(topic);
+        console.log("Inscrito no tópico:", topic);
+    }
+
+    // ===============================
+    // CONECTA AO MQTT
+    // ===============================
+    client.connect({
+        onSuccess: onConnect,
+        userName: usuario,
+        password: senha,
+        useSSL: false,  // coloque true se usar WSS
+    });
+</script>
+
+</body>
+</html>

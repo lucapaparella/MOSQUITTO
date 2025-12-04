@@ -25,9 +25,9 @@ def on_message(client, userdata, msg):
 # Configuração do Cliente
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 
-# --- AQUI ESTÁ A MUDANÇA ---
+
 client.username_pw_set(USUARIO, SENHA)
-# ---------------------------
+
 
 client.on_connect = on_connect
 client.on_message = on_message
