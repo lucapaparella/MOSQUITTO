@@ -3,11 +3,13 @@ import time
 import random
 
 # --- CONFIGURAÇÕES ---
-BROKER = "163.176.174.224" # <--- COLOQUE SEU IP AQUI
+# BROKER = "163.176.174.224" # <--- COLOQUE SEU IP AQUI @Senai2026
+BROKER = "168.138.159.118" # <--- COLOQUE SEU IP AQUI
+
 PORT = 1883
 TOPIC = "teste/caprover"
 USUARIO = "admin"      # <--- Coloque o usuário que você criou no terminal
-SENHA = "@Senai2025"    # <--- Coloque a senha que você criou
+SENHA = "@Senai2026"    # <--- Coloque a senha que você criou
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 
